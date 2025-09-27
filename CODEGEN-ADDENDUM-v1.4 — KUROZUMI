@@ -1,7 +1,3 @@
-了解。原因は「指示が“足りていない/曖昧なまま”の領域」がまだ残っているからです。
-**シート数は据え置き**のまま、**MPA × GAS × HTML**だけで **Ironman×モノトーン・サイバーパンク**のHUDを“中央レイアウト”で実装させ、**ERの中身は列レベルで深堀**し、**Back常設＋状態復元＋監査＋期間重複**まで漏れなく反映させるための**追加指令テンプレ**を用意しました。
-このまま `CODEGEN-ADDENDUM-v1.4.md` としてリポジトリに追加し、**README / CODEGEN.md / v1.3 加筆分**と**セットでCodexに読み込ませて**ください。
-
 ---
 
 # CODEGEN-ADDENDUM-v1.4 — KUROZUMI（UI/UX特化・中央レイアウト・ER密度・AC強化）
@@ -438,3 +434,359 @@ Start/People.List/Pricing.Listにダミーデータをセットし、中央配�
 * [ ] `TRN_AuditTrail` に `ip/ua/route/session_id` が入っている
 * [ ] 外部CSS/JS**不使用**（.gs/.htmlのみ）
 * [ ] トーストは右上・`aria-live="polite"`・ショートコピー固定
+了解。**“UIの見た目”ではなく、ER/機能関連/システムフロー/ボタン→処理→シート反映の作り込み**を、いまの **HTML/gs の枠内**・**シート数を増やさない**条件で、**Codexにやらせ切るための指令書（実装仕様）**としてまとめます。
+以下はそのまま**CODEGEN.md 追補**や **README の実装章**に貼って、Codexへ投げられる粒度です（コード断片は出しません／関数名・I/O契約だけ示します）。
+
+---
+
+# Spec Pack v1.1.1（深掘り版）— “何を押すと何が起きて、どのシートのどの列がどう更新されるか”
+
+## A. 画面体系（MPA）と親子項目マップ
+
+> 画面は **Start → Domain Hub → List → Detail → Edit/Confirm**。
+> **Back は常設**（直前状態復元）。**シート数は増やさない**。各画面のボタンは**必ず API 経由**でシートへ反映。
+
+### A-1. Domain Hub（カテゴリと親子の対応）
+
+| 親カテゴリ（Route）                  | 子リソース（親子）                                       | List列（抜粋）            | 主キー                            | 保存先シート                                                                               |
+| ----------------------------- | ----------------------------------------------- | -------------------- | ------------------------------ | ------------------------------------------------------------------------------------ |
+| People (`/people`)            | Person → Employment → UserAccount / GroupMember | 氏名、配属、雇用形態、状態        | `person_id`                    | `MST_Person`, `MST_Employment`, `MST_UserAccount`, `TRN_UserRole`, `TRN_GroupMember` |
+| Stores (`/stores`)            | Division → Store → Asset                        | 店舗コード、区分、ステータス、開店/閉店 | `store_id`                     | `MST_Division`, `MST_Store`, `MST_Asset`                                             |
+| Franchise (`/franchise`)      | Franchisee → FranchiseContract (⇄ Store)        | FCコード、契約ID、期間、ロイヤルティ | `franchisee_id`, `contract_id` | `MST_Franchisee`, `MST_FranchiseContract`                                            |
+| Products (`/products`)        | Product → BOM_Component                         | SKU、カテゴリ、標準原価        | `product_id`, `bom_id`         | `MST_Product`, `BOM_Component`                                                       |
+| Menu & Pricing (`/pricing`)   | MenuItem → Price → Promotion/Applicability      | メニュー、価格、期間、税区分       | `menu_item_id`, `price_id`     | `MST_MenuItem`, `MST_Price`, `MST_Promotion`, `LNK_PromoApplicability`               |
+| Inventory (`/inventory`)      | PurchaseOrder → PO_Line → StockLot → StockMove  | 仕入/入荷、在庫ロット、移動       | `po_id`, `lot_id`, `move_id`   | `TRN_PurchaseOrder`, `TRN_PO_Line`, `TRN_StockLot`, `TRN_StockMove`                  |
+| Sales (`/sales`)              | SalesReceipt → SalesLine → Tender               | 取引ID、日時、計、決済         | `receipt_id`, `line_id`        | `TRN_SalesReceipt`, `TRN_SalesLine`, `TRN_Tender`                                    |
+| Quality & Safety (`/quality`) | Incident → IncidentParticipant                  | 種類、発生日、店舗、SLA        | `incident_id`, `inc_part_id`   | `TRN_Incident`, `TRN_IncidentParticipant`                                            |
+| Assets & Maint. (`/assets`)   | Asset → MaintTicket                             | 機器、シリアル、保守、発生/完了     | `asset_id`, `ticket_id`        | `MST_Asset`, `TRN_MaintTicket`                                                       |
+| Docs & Workflow (`/docs`)     | Document → DocumentLink                         | 文書、版、カテゴリ、権限         | `doc_id`, `doc_link_id`        | `TRN_Document`, `LNK_Document`                                                       |
+
+---
+
+## B. 役割別の「見せ方」「できること」マトリクス（RBAC + ビュー制御）
+
+> **同じ List/Detail でも、役割で列・ボタンの可視／不可視を分岐**。
+> シートは増やさず、**フロントの表示制御＋サーバ側の権限検証**で担保。
+
+### B-1. 役割×画面アクション（抜粋）
+
+| 画面/リソース            |      HQ_ADMIN | AREA_MANAGER | STORE_MANAGER | STORE_STAFF |  HR | FINANCE |     LEGAL | AUDITOR |
+| ------------------ | ------------: | -----------: | ------------: | ----------: | --: | ------: | --------: | ------: |
+| Person List/Detail | R/W/D/Approve |     R/W (配下) |         R（自店） |     R（自分のみ） | R/W |       – |         – |       R |
+| UserAccount        |         R/W/D |            – |             – |           – |   R |       – |         – |       R |
+| Store              |         R/W/D |      R/W（配下） |       R/W（自店） |   R（公開項目のみ） |   – |       – |         – |       R |
+| Pricing（Price）     | R/W/D/Approve |      R/W（配下） |         R（閲覧） |           – |   – |       – |         – |       R |
+| Sales              |         R（全体） |        R（配下） |         R（自店） |           – |   – | R/W（集計） |         – |       R |
+| Incident           |         R/W/D |      R/W（配下） |       R/W（自店） |   R/W（一次報告） |   – |       – | R（法務レビュー） |       R |
+| Document           |         R/W/D |            – |             – |           – |   – |       – |     R/W/D |       R |
+
+**D = Soft Delete 標準。Hard Delete は HQ_ADMIN 限定ユーティリティからのみ。**
+**Approve = 期間重複や重要項目の承認（価格・契約等）。**
+
+### B-2. 列レベル表示制御（例）
+
+* `MST_Person.bank_account`, `consent_doc_link` … **HQ_ADMIN/HR のみ可視**
+* `MST_Store.health_office_name`, `license_deepnight_expiry` … **HQ/Area/StoreMgr は可視**
+* `TRN_AuditTrail.before_json/after_json` … **AUDITOR/HQ_ADMIN のみ可視**
+
+---
+
+## C. **ボタン → API → シート書き込み** 完全ルート表（実働契約）
+
+> **HTML 側のボタンID**と**Apps Script 側のエンドポイント名**と**対象シート・列更新**を 1:1 で紐付け。
+> **監査**は全アクションで `TRN_AuditTrail`／`TRN_AuditItem` に残す。
+> **削除はソフト削除**（`active_flag=false`, `deleted_*`）。
+
+### C-1. People（ユーザー登録/更新/削除/復元）
+
+| UIボタン（id）             | API（`doPost` ルート）        | リクエスト（必須キー）                       | 更新シート/列                                             | 監査 `operation`                 |
+| --------------------- | ------------------------ | --------------------------------- | --------------------------------------------------- | ------------------------------ |
+| `btnPersonCreate`     | `/api/person.create`     | `person{...}`, `employment?{...}` | `MST_Person`（新行, 共通列 auto）, `MST_Employment`（雇用履歴行） | `CREATE`                       |
+| `btnPersonUpdate`     | `/api/person.update`     | `person_id`, `patch{...}`         | `MST_Person`（差分更新）, 必要に応じ `MST_Employment`          | `UPDATE`（列ごとに `TRN_AuditItem`） |
+| `btnPersonSoftDelete` | `/api/person.deleteSoft` | `person_id`, `reason?`            | `MST_Person.active_flag=false`, `deleted_*`         | `DELETE_SOFT`                  |
+| `btnPersonRestore`    | `/api/person.restore`    | `person_id`                       | `MST_Person.active_flag=true`, `deleted_*` null     | `RESTORE`                      |
+
+> **重複検知**：`name_kana + birthdate + phone` 厳密一致時は `DUPLICATE_PERSON` 返却（UIはトースト警告）。
+> **列表示**：`bank_account` など機微項目は HR/HQ のみ表示・編集可。
+
+### C-2. Stores（店舗登録/更新/削除）
+
+| UIボタン            | API                     | リクエスト                                                              | 更新先                           | 監査            |
+| ---------------- | ----------------------- | ------------------------------------------------------------------ | ----------------------------- | ------------- |
+| `btnStoreCreate` | `/api/store.create`     | `store{division_id, store_code, kind, address..., open_date, ...}` | `MST_Store` 新行                | `CREATE`      |
+| `btnStoreUpdate` | `/api/store.update`     | `store_id`, `patch{...}`                                           | `MST_Store`                   | `UPDATE`      |
+| `btnStoreDelete` | `/api/store.deleteSoft` | `store_id`                                                         | `MST_Store.active_flag=false` | `DELETE_SOFT` |
+
+### C-3. Pricing（価格の期間重複ブロック）
+
+| UIボタン            | API                 | リクエスト                                                                     | 更新先               | 監査                   | エラー                        |
+| ---------------- | ------------------- | ------------------------------------------------------------------------- | ----------------- | -------------------- | -------------------------- |
+| `btnPriceUpsert` | `/api/price.upsert` | `{menu_item_id, price, tax_code, start_on, end_on, store_id?, timeband?}` | `MST_Price`（履歴追記） | `CREATE` or `UPDATE` | `PRICE_RANGE_OVERLAP`（409） |
+
+> **noOverlap 判定**：キー（`menu_item_id`,`store_id`）で `[start_on,end_on]` の重複を禁止。
+
+### C-4. Inventory（在庫ロット/移動）
+
+| UIボタン           | API                  | リクエスト                                                            | 更新先                | 監査       |
+| --------------- | -------------------- | ---------------------------------------------------------------- | ------------------ | -------- |
+| `btnReceiveLot` | `/api/stock.receive` | `{product_id, store_id, received_on, expiry_on, qty, unit_cost}` | `TRN_StockLot` 新規  | `CREATE` |
+| `btnMoveStock`  | `/api/stock.move`    | `{lot_id, from_loc, to_loc, qty, reason, ref_id?}`               | `TRN_StockMove` 追記 | `CREATE` |
+
+### C-5. Sales（売上）
+
+| UIボタン            | API                        | リクエスト                                                               | 更新先                                               |
+| ---------------- | -------------------------- | ------------------------------------------------------------------- | ------------------------------------------------- |
+| `btnSalesCreate` | `/api/sales.createReceipt` | `receipt{store_id, cashier_person_id, sold_at, lines[], tenders[]}` | `TRN_SalesReceipt`, `TRN_SalesLine`, `TRN_Tender` |
+
+### C-6. Incident（品質）
+
+| UIボタン               | API                    | 更新先                                       |
+| ------------------- | ---------------------- | ----------------------------------------- |
+| `btnIncidentReport` | `/api/incident.report` | `TRN_Incident`, `TRN_IncidentParticipant` |
+
+> 以降のドメイン（Franchise/Docs/Assets など）も**同形式**で列挙（シート数は既存維持）。
+
+---
+
+## D. **ER図/機能関連図/システムフロー**（Mermaid スニペット再掲＋差分注記）
+
+> 既存ERは維持。**差分は子テーブルの「操作起点」を図中コメントで明示**し、「どの画面のどのボタンからその子が追加されるか」を追記する。
+> GitHub の `docs/er/` に分割保存。
+
+### D-1. 機能関連図（操作起点コメント付き・例）
+
+```mermaid
+flowchart TB
+  People[People\n(PERSON/EMPLOYMENT/USER)]:::op
+  Stores[Stores\n(STORE/DIVISION/ASSET)]:::op
+  Pricing[Pricing\n(MENU_ITEM/PRICE/PROMO)]:::op
+  Sales[Sales\n(RECEIPT/LINE/TENDER)]:::op
+  Inventory[Inventory\n(LOT/MOVE)]:::op
+
+  People --> Sales
+  Products --> Pricing --> Sales
+  Inventory --> Sales
+  Stores --> Inventory
+  Stores --> Sales
+
+classDef op fill:#111,stroke:#2af,stroke-width:1px,color:#e6ffff;
+```
+
+**差分注記（README へ）**：
+
+* `PRICE` は **Pricing List の「新規価格」ボタン**から作成。
+* `EMPLOYMENT` は **Person Detail の「配属を追加」**から作成。
+* `STOCK_MOVE` は **Inventory Detail の「移動」**から作成。
+
+### D-2. 主要シーケンス（押下→検証→書込→監査→復帰）
+
+Person作成・価格改定・ソフト削除の3本は既出。ここに**ユーザー登録（UserAccount）**を追加：
+
+```mermaid
+sequenceDiagram
+  actor Admin
+  participant UI
+  participant API as GAS API
+  participant REPO
+  participant AUD as Audit
+  participant DB as Sheets
+
+  Admin->>UI: ユーザー登録（Personを選択→ログインID/ロール）
+  UI->>API: POST /api/userAccount.create {person_id, login_id, roles[]}
+  API->>REPO: upsert MST_UserAccount, TRN_UserRole
+  REPO->>DB: 追記（共通列付与）
+  API->>AUD: log CREATE (UserAccount, UserRole)
+  AUD->>DB: 監査追記
+  API-->>UI: {ok:true, user_id}
+  UI-->>Admin: 成功トースト（BackでPerson詳細に復帰）
+```
+
+---
+
+## E. **フィールド設計の「親→子→孫」チェックリスト**（シート増やさず充足）
+
+> 各親画面に**子作成のエントリポイント**を設け、**必須キーを親から引き継ぐ**ことでブレない入力を担保。
+
+### E-1. People 親→子
+
+* 親：`MST_Person(person_id)`
+* 子：`MST_Employment(person_id, store_id, start_on, end_on, ... )`
+* 孫：`MST_UserAccount(person_id, login_id, ...)`、`TRN_UserRole(user_id, role_id, start_on, end_on)`
+
+**UI要件**
+
+* Person Detail に **「配属を追加」「ユーザーを付与」**ボタン。押下でモーダル開→親ID（person_id）を hidden で持参。
+* 保存後は Detail に戻り、**差分ハイライト**と **Back**で一覧に復帰。
+
+### E-2. Store 親→子
+
+* 親：`MST_Store(store_id)`
+* 子：`MST_Asset(store_id, ...)`
+
+### E-3. Menu & Pricing 親→子
+
+* 親：`MST_MenuItem(menu_item_id)`
+* 子：`MST_Price(menu_item_id, store_id?, start_on, end_on, price, tax_code, timeband?)`
+* 検証：**`noOverlap(menu_item_id, store_id)`**で期間重複禁止。
+
+…（Inventory, Sales, Incident も同様の親→子→孫を README に項目化）
+
+---
+
+## F. **権限で“見せない”設計（画面・列・アクション）**
+
+> **見せない**→**押せない**→**サーバ側でも拒否**の三層防御。
+
+1. **画面ルート制御**
+
+* `UiRouteService.resolve(user_roles)` でアクセス可能 Route のみメニュー表示。
+* 不正直打ちURLは 403 カード（Back で退避）。
+
+2. **列レベル制御**
+
+* `scripts.html` のテーブルレンダリングで `visibleColumnsByRole[route][role]` を適用。
+* 例：Staff は `bank_account` 列を受け取っても描画しない。
+
+3. **アクション制御**
+
+* ボタンに `data-required-role="HR|HQ_ADMIN|..."` を付与し、クライアントで無効化。
+* サーバ側も API で `roleGate(entity, op, user)` を必須化（未満は `FORBIDDEN`）。
+
+---
+
+## G. **性能・大規模運用（1シート数万行OK）**
+
+* **ページング**：List は `limit=100, cursor`。Back 復帰時に cursor と検索条件を復元。
+* **検索**：`Repo.query(table, filterDSL)`（AND/OR/範囲）。`CacheService` で LKP を 30 分キャッシュ。
+* **排他**：`Lock.withLock(table, fn)` で同時更新保護、指数リトライ。
+* **更新方式**：まとめて `Sheets.batchUpdate`。差分抽出のみ更新。
+* **アーカイブ**：年度末に TRN 系を `_ARCHIVE_YYYY` へローテーション（**シート数は増やさない**、同一ブック内で分割）。
+
+---
+
+## H. **Codex への追加指令（不足なく作り込ませるための“言い切り”プロンプト）**
+
+> 既存の STAGE 指令に**以下を追加**してください。**コードは生成するが、シート数は変えない**ことを明記します。
+
+### H-1. ROUTE/画面とボタン定義を先に固定する指示
+
+```
+次を厳密に実装せよ（コードは .gs/.html のみ、シート数は一切増やさない）：
+1) 画面ルート：/people, /stores, /franchise, /products, /pricing, /inventory, /sales, /quality, /assets, /docs
+2) 各List/Detail/編集モーダルのボタンIDを固定し、ボタン→API→シート列のマップは CODEGEN.md C章に一致させる
+3) RBAC: 画面/列/アクションの三段制御を入れる（表示非表示＋API側Gate）
+4) Back復帰：検索条件/ページ/ソート/選択/ドロワー状態を復元する
+5) 監査：全API操作で TRN_AuditTrail/Item を追記する（before/afterは差分）
+6) 期間重複：Pricing.upsert で noOverlap を必須化（409エラー）
+```
+
+### H-2. ER/機能図の「操作起点コメント」を README に自動反映する指示
+
+```
+Mermaid図（ER/機能関連/シーケンス/DFD）は docs/er/* に分割保存し、
+各子テーブルの作成起点（どの画面のどのボタンから作るか）をコメントで追記して README にも再掲すること。
+```
+
+### H-3. 列レベル制御・可視性の辞書を埋める指示
+
+```
+routes/{route}/visibleColumnsByRole を定義し、描画時に列フィルタを適用する。
+機微項目（銀行口座、同意リンク、監査JSON等）は HR/HQ/AUDITOR のみ可視。
+クライアントとサーバの両方で権限チェックを行うこと。
+```
+
+### H-4. 大規模対応の必須要件
+
+```
+Repo.query は filterDSL（field op value の配列）を取り、結果をページングして返す。
+トランザクション更新は Lock.withLock＋batchUpdate で行い、共通列（updated_*, deleted_*）を自動設定する。
+```
+
+---
+
+## I. **受け入れ基準（この通り動けば合格）**
+
+1. **ボタン→シート**：People/Stores/Pricing/Inventory/Sales/Incident の代表アクションが、**対応シートの正しい列**に書き込まれる。
+2. **RBAC**：一般ユーザには機微列が一切見えず、押下も不可。直打ちは 403。
+3. **Back**：List→Detail→Edit→Back で**検索条件・ページ・選択行**が復元。
+4. **ソフト削除**：`active_flag=false` で UI グレーアウト（または非表示）、監査は `DELETE_SOFT`。復元で `RESTORE`。
+5. **価格重複**：重複期間を 409 エラーで拒否し、UIはトースト表示＋該当既存行を提示。
+6. **性能**：5万行相当の List でも 100件ページングで操作が継続可能。
+7. **シート数**：**一切増えていない**（UIナビ拡張は今回 “使わない” 設定）。
+
+---
+
+## J. **ユーザー登録/削除（UserAccount）と権限制御の実装契約（ノーコード版）**
+
+* **登録**：`/api/userAccount.create {person_id, login_id, two_factor, roles[]}`
+
+  * 書込：`MST_UserAccount`（1行）、`TRN_UserRole`（roles配列分）
+  * 監査：`CREATE`×2（UserAccount, UserRole）
+  * 画面：Person Detail の「ユーザーを付与」からのみ起動
+
+* **削除（ソフト）**：`/api/userAccount.deleteSoft {user_id}`
+
+  * 書込：`MST_UserAccount.active_flag=false, deleted_*`
+  * 監査：`DELETE_SOFT`
+  * 復元：`/api/userAccount.restore {user_id}` → `active_flag=true`
+
+* **権限制御**：
+
+  * ルート入場：`UiRouteService.resolve(user)`
+  * 列表示：`visibleColumnsByRole` 辞書
+  * アクション：`roleGate(entity, op, user)`（API入口で必須）
+
+---
+
+## K. **システムフロー（MPA×GAS×Sheets：押下単位の時系列）**
+
+1. **List表示**：UI が `query(filter, page)` → GAS `Repo.query` → Sheets 読込 → JSON 返却 → 表描画（役割で列を間引く）
+2. **Detail遷移**：`NAV_PUSH(route, params, state)` で履歴積む → Detail 表示
+3. **編集→保存**：ボタン押下 → `doPost` API → `Validate.*` → `Repo.upsert/softDelete` → `Audit.log` → 正常応答 → UI トースト → **Backで Detail/ List の状態復元**
+4. **削除**：SoftDelete → UI グレーアウト or 非表示（設定） → 復元は逆手順
+5. **価格重複**：`Validate.noOverlap` が NG を返す → 409 エラー → UI トースト＆該当期間ハイライト
+
+---
+
+## L. **あなたの今の .gs / .html に“足すだけ”で届く変更点リスト（実装観点）**
+
+> コードは生成させます。ここでは**何を足すべきか**だけ。
+
+1. `UiRouteService.gs`
+
+   * ルート配列に **10カテゴリ**を定義（A-1参照）。
+   * `resolve(user)` が役割に応じた表示ルートを返却。
+
+2. `scripts.html`
+
+   * **ボタンIDを固定**（C章参照）。
+   * `visibleColumnsByRole` を辞書化。
+   * `historyStack` に **検索条件・ページ・ソート・選択行・ドロワー状態**を保存/復元。
+
+3. `UiController.gs`
+
+   * `doPost` で **全APIルート**をディスパッチ（/api/person.*, /api/store.*, /api/price.*, …）。
+   * 入口で `roleGate`／`validateRequest` を必ず通す。
+
+4. `Repo.gs / Validate.gs / Audit.gs`
+
+   * `upsert/softDelete/hardDelete/noOverlap/log` を**契約どおり**に。
+   * 共通列は **自動更新**（created/updated/deleted）。
+
+5. `styles.html`
+
+   * 見た目は据え置きで良いが、**グレーアウト**（`[data-inactive="true"]`）のスタイルと**差分ハイライト**を確実に追加。
+
+---
+
+## M. 最後に：シート数は固定のまま中身で勝つ
+
+* **親→子→孫**は「親画面からの子作成ボタン」で繋ぎ、**主キー受け渡し**で整合。
+* **RBAC**は「見せない・押せない・サーバ拒否」の三層に分解。
+* **監査/ソフト削除/期間重複**は全部“標準装備”。
+* **大量行**はページング＋Lock＋バッチ更新で実運用可。
+* **図面（ER/機能/DFD/シーケンス）**は**操作起点コメント**を付けて GitHub `docs/` に再掲し、**README にリンク**。
+
+---
+
+
