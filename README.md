@@ -1498,3 +1498,471 @@ apps_script/
 * **安心運用**：リスクゼロ設計（ロック、バリデーション、ガード）、日次バックアップ、法的保持対応。
 
 この総刷新仕様をベースに、KUROZUMI フロントと Google スプレッドシートが無二のナイトオペレーション HQ を実現する。ユーザーはワクワクする HUD で全店舗を掌握し、同時に監査・コンプラ・可観測性の要件を満たすことができる。
+了解。あなたのREADMEと要件を**絶対保持**したうえで、Codex（または同等の生成AI）が**.gs/.htmlのみ**で**GAS×MPA×Sheets**一式を確実に吐き切れるよう、**コードは出さず**に「生成AIが従う契約・順序・合格条件・自己検証ルーブリック」を最大強度で拡張しました。
+下の全文を `CODEGEN.md`（v1.2）としてリポジトリに置いてください。READMEとセットで読み込ませれば、**世界水準レベルの精度で .gs / .html のみ**を段階生成させられます。
+
+---
+
+# CODEGEN.md — KUROZUMI v1.2 生成タスク台本（GAS × MPA × Google Sheets／.gs & .html Only）
+
+> **用途**：生成AI（Codex 等）が**Apps Script（.gs）＋ HTMLService（.html）**だけで、README（KUROZUMI v1.1）の要件を**完全充足**する骨格実装を**段階生成**するための**唯一の仕様**。
+> **禁止**：Node/TS/ビルド/外部NPM/外部API。**.gs/.html 以外のファイルを出力しない**。
+> **Master DB**：`https://docs.google.com/spreadsheets/d/1pJq2KT4WSfRIFdjGhZxm2m8aYfeq1g2KbUVLxPEL8TI/edit#gid=1926398647`（以後「指定ブック」）。**このブックを絶対に前提**とする。
+
+---
+
+## 0) ゴール / 非ゴール / 絶対制約
+
+### ゴール
+
+* README（KUROZUMI v1.1）＋本台本 v1.2 に**完全準拠**した **GAS（.gs）× MPA（.html）× Sheets（Master DB）** の**骨格コード**を、**段階的に自動生成**させる。
+* **戻る（Back）常設／状態復元／ソフト削除／完全監査／RBAC／期間重複検証**を**最小実用レベル**で含む。
+* **指定ブック**に CRUD する。**UIの削除はソフト削除既定**（非表示またはグレー化）。ハード削除は管理ユーティリティ経由のみ。
+
+### 非ゴール
+
+* 高度UI演出・最適化、BigQuery/Looker 等ETL、外部IDP連携、CI/CDの自動化。
+
+### 絶対制約（逸脱禁止）
+
+* 生成物は **.gs と .html のみ**。**.ts/.css/.json/.yml などは禁止**。
+* **スキーマ名・列名・語彙**は README の `MST_* / TRN_* / LKP_* / LNK_*` と**完全一致**。
+* **ソフト削除＝標準**、**監査ログ＝全操作必須**。
+* **MPA**は**Backボタン常設**＋**履歴N=50**＋**状態復元**。
+* **ER/フロー/機能関連図**は README の記法・内容を**そのまま** docs へ再掲（編集しない）。
+
+---
+
+## 1) 生成アウトプット構成（.gs/.htmlのみ・固定命名）
+
+> **注意**：ここで宣言した**ファイル名・役割・公開関数**は**契約**。必ずこの構成・命名で出力すること。
+
+```
+apps_script/
+  appsscript.json        #（※生成は行うが最終配置は開発者が手動反映。中身は本台本で要件定義のみ）
+  Config.gs              # 定数（SS_MASTER_ID, シート名, 共通列, スキーマ版）
+  Uuid.gs                # UUID/ULID 生成
+  Time.gs                # ISO日時ユーティリティ
+  Lock.gs                # LockService ラッパ（指数リトライ）
+  Sheets.gs              # シートIOユーティリティ（get/ensure/append/batch/update）
+  Repo.gs                # 汎用CRUD（findById/query/upsert/softDelete/hardDelete）
+  Validate.gs            # 必須/LKP/期間重複/一意
+  Audit.gs               # TRN_AuditTrail/Item への完全監査記録
+  NavService.gs          # 履歴スタック（Back常設/状態保存・復元）
+  UiRouteService.gs      # ルート権限制御（最小はin-memory、拡張でMST_Ui*参照）
+  PersonService.gs       # Person/Employmentの業務ロジック
+  PersonEndpoints.gs     # /api/person.* の入口（doPostディスパッチから呼ばれる）
+  StoreService.gs        # Store周辺（最小：参照・雛形）
+  PricingService.gs      # 価格upsert（期間重複検証）
+  UiController.gs        # doGet / doPost（JSON APIファサード）
+  index.html             # ルートHTML（固定ヘッダBack/パンくず/2ペインレイアウト）
+  styles.html            # HUD風スタイル（インライン <style> のみ／外部CSS禁止）
+  scripts.html           # MPAロジック（Back/履歴/未保存ガード/フェッチ）
+docs/
+  er/*.md                # README掲載のMermaidをそのまま再掲（内容変更禁止）
+```
+
+> `sheets/` 以下のCSVやmdは**今回の出力対象外**（コード禁止要件のため）。必要な定義は `Config.gs` に明記。
+> Mermaid は**READMEに既出**のものを**再掲**するだけ（生成AIは中身に手を加えない）。
+
+---
+
+## 2) 共有定義（不変契約）
+
+* **Master DB**：指定ブックを `SpreadsheetApp.openById(SS_MASTER_ID)`。
+* **共通列**：`created_at, created_by, updated_at, updated_by, active_flag, deleted_at, deleted_by`（全表必須）。
+* **キー**：内部キー＝UUID/ULID、人間可読コードは別列。
+* **期間列**：`start_on, end_on`（価格/契約/配属等）→**重複禁止**。
+* **ソフト削除標準**：`active_flag=false`＋`deleted_*`。UIは非表示／グレーアウト（両対応）。
+* **監査**：`TRN_AuditTrail`（ヘッダ）＋`TRN_AuditItem`（差分）。**全操作必須**。
+* **UI/ナビ**：Back常設、履歴N=50、状態復元（検索条件/ページ/ソート/選択/ドロワー）、未保存ガード。
+* **ER/フロー図**：READMEのMermaidをそのまま `docs/er/` に再掲。
+
+---
+
+## 3) ファイル別「公開関数インタフェース契約」（**コードは書かない／署名と目的のみ**）
+
+> 生成AIは**以下の関数を必ず実装**。名前・引数キー・返却形は**この契約に一致**させること。
+
+### Config.gs
+
+* `Config.getMasterId(): string` — **固定で** 指定ブックIDを返す（ハードコード）。
+* `Config.tables(): { [logicalName: string]: string }` — `MST_* / TRN_* / LKP_* / LNK_*` **全シート名**を返す。
+* `Config.commonColumns(): string[]` — 共通列配列。
+* `Config.schemaVersion(): string` — `v1.1` 等。
+* `Config.ui(): { historySize: number }` — 履歴上限（50）。
+
+### Uuid.gs
+
+* `Uuid.newUuid(): string`
+* `Uuid.newUlid(): string`（簡易ULIDで可）
+
+### Time.gs
+
+* `Time.nowIso(): string`
+* `Time.todayIso(): string`
+* `Time.parseIso(s: string): Date`
+
+### Lock.gs
+
+* `Lock.withLock(key: string, fn: () => any): any` — 指数リトライ3回、500ms指数バックオフ。
+
+### Sheets.gs
+
+* `Sheets.getSheet(name: string): GoogleAppsScript.Spreadsheet.Sheet`
+* `Sheets.ensureSheet(name: string, headers: string[]): void`
+* `Sheets.getHeader(name: string): string[]`
+* `Sheets.getAll(name: string, opts?: { activeOnly?: boolean }): any[]`
+* `Sheets.append(name: string, row: object): string` — 返却は新UUID等。
+* `Sheets.batchUpdate(name: string, rowsByIndex: { index: number, row: object }[]): void`
+
+### Repo.gs
+
+* `Repo.findById(table: string, id: string): object|null`
+* `Repo.query(table: string, filter: object): object[]`
+* `Repo.upsert(table: string, obj: object, userId: string): { id: string, created: boolean }`
+* `Repo.softDelete(table: string, id: string, userId: string): { id: string, status: 'SOFT_DELETED' }`
+* `Repo.hardDelete(table: string, id: string, userId: string): { id: string, status: 'HARD_DELETED' }`
+
+### Validate.gs
+
+* `Validate.require(obj: object, requiredKeys: string[]): void|Error`
+* `Validate.inList(value: string, list: string[]): void|Error`
+* `Validate.dateRange(start: string, end: string): void|Error`
+* `Validate.noOverlap(table: string, keySet: object, start: string, end: string): void|Error`
+* `Validate.uniqueCombo(table: string, keys: string[], values: any[]): void|Error`
+
+### Audit.gs
+
+* `Audit.log(userId: string, entity: string, entityId: string, op: 'CREATE'|'UPDATE'|'DELETE_SOFT'|'RESTORE'|'DELETE_HARD', beforeObj: object|null, afterObj: object|null): void`
+
+### NavService.gs
+
+* `Nav.push(route: string, params: object, state: object): void`
+* `Nav.replace(route: string, params: object, state: object): void`
+* `Nav.back(): { route: string, params: object, state: object }|null`
+* `Nav.reset(toRoute?: string): void`
+
+### UiRouteService.gs
+
+* **最小構成**：in-memory
+
+  * `UiRoutes.allowedFor(roleCode: string): { route: string, title: string }[]`
+* **拡張構成**：MST_UiRoute/MST_UiRouteAccessにも対応できる柔軟な設計（存在判定でハンドオーバ）
+
+### PersonService.gs
+
+* `PersonService.create(payload: { person: object, employment?: object }, userId: string): { person_id: string }`
+* `PersonService.update(personId: string, patch: object, userId: string): { updated: true, diff: object }`
+* `PersonService.softDelete(personId: string, reason: string|undefined, userId: string): { status: 'SOFT_DELETED' }`
+* `PersonService.restore(personId: string, userId: string): { status: 'RESTORED' }`
+
+### PersonEndpoints.gs（/api）
+
+* `ApiPerson.create(request: object): object` → `/api/person.create`
+* `ApiPerson.update(request: object): object` → `/api/person.update`
+* `ApiPerson.deleteSoft(request: object): object` → `/api/person.deleteSoft`
+* `ApiPerson.restore(request: object): object` → `/api/person.restore`
+
+### PricingService.gs
+
+* `PricingService.upsertPrice(payload: { menu_item_id: string, price: number, tax_code: string, start_on: string, end_on: string, store_id?: string, timeband?: string }, userId: string): { price_id: string }`
+
+  * **重複時**は 409 相当のエラー返却（`{ ok:false, code:'PRICE_RANGE_OVERLAP', ... }`）。
+
+### StoreService.gs
+
+* 最小：参照や雛形関数を用意（今後拡張）。`StoreService.findByCode`, など。
+
+### UiController.gs
+
+* `doGet(e)`：Start→カテゴリ→一覧→詳細（Back常設）。
+* `doPost(e)`：`/api/*` ディスパッチ。**全レスポンスは `{ ok: true|false, data|code|message|details }` 規約**。
+
+### index.html / styles.html / scripts.html
+
+* **index.html**：固定ヘッダ（Back・Breadcrumb・SessionInfo）＋左カテゴリ×右テーブルの2ペイン。
+* **styles.html**：**内蔵 `<style>`** にHUD（モノトーン＋シアン微発光／AAコントラスト／角丸2xl／フォーカスリング／行グレーアウト）。
+* **scripts.html**：`NAV_PUSH/REPLACE/BACK/RESET`、未保存ガード（破棄/保存/キャンセル）、`fetch('/api/*')` ラッパ、差分ハイライトの制御。
+
+---
+
+## 4) 生成ステージ（順序・作法・合格条件）
+
+> **ステージ完了前に次へ進んではいけない。** 各ステージで**AC（Acceptance Criteria）自己検証**→**満たすまでリトライ**。
+
+### Stage 1 — マニフェスト & 定数
+
+**出力**：`appsscript.json`, `Config.gs`
+**要件**：
+
+* スコープ：`https://www.googleapis.com/auth/spreadsheets`, `.../drive.readonly`
+* `SS_MASTER_ID` は **指定ブックIDをハードコード**
+* `Config.tables()` に **全テーブル名**（README準拠）
+  **AC**：
+* スコープが正しく宣言されている
+* 参照先ID/表名/共通列/履歴上限が**定数化**されている
+
+### Stage 2 — 基盤ユーティリティ
+
+**出力**：`Uuid.gs`, `Time.gs`, `Lock.gs`, `Sheets.gs`
+**要件**：
+
+* Lockは指数リトライ（3回/500ms指数）
+* ensureSheetはヘッダ自動設定
+* すべてJSDocでI/O・例外を記述
+  **AC**：
+* 擬似的に `ensureSheet` 想定でヘッダが無い場合の**自動作成手順**が仕様に沿う
+
+### Stage 3 — Repo / Validate / Audit
+
+**出力**：`Repo.gs`, `Validate.gs`, `Audit.gs`
+**要件**：
+
+* `upsert` は `created_* / updated_*` を自動付与
+* `softDelete` は `active_flag=false` と `deleted_*`、監査 `DELETE_SOFT` を記録
+* `noOverlap` は同一キー集合内の期間重複を検出
+  **AC**：
+* CREATE/UPDATE/DELETE_SOFT/RESTORE/DELETE_HARD が `TRN_AuditTrail/Item` に必ず残る
+* `noOverlap` が READMEの期間整合ルールに合致
+
+### Stage 4 — UIナビ & RBAC（Back常設）
+
+**出力**：`NavService.gs`, `UiRouteService.gs`, `UiController.gs`, `index.html`, `styles.html`, `scripts.html`
+**要件**：
+
+* 固定ヘッダBack、履歴N=50、状態復元、未保存ガード
+* 403の簡易権限ブロック（詳細RBACは拡張でMST_Ui*可）
+  **AC**：
+* 一覧→詳細→編集→Backで**検索条件/ページ/ソート/選択/ドロワー**が復元
+
+### Stage 5 — ドメイン（People / Pricing / Store雛形）
+
+**出力**：`PersonService.gs`, `PersonEndpoints.gs`, `PricingService.gs`, `StoreService.gs`
+**要件**：
+
+* People：create/update/softDelete/restore（重複＝氏名カナ＋生年月日＋電話の厳密一致）
+* Pricing：同 `menu_item_id+store_id` の**期間重複**ブロック（409）
+  **AC**：
+* person.create が重複時に `DUPLICATE_PERSON` を返す
+* price.upsert が重複時に `PRICE_RANGE_OVERLAP` を返す
+
+### Stage 6 — 最小E2E整合
+
+**出力**：**なし（自己検証）**
+**要件**：API 全系の**I/O整合**、Back の**3段復帰**、ソフト削除→UI非表示/グレー表示の**切替**、監査が**必ず記録**
+**AC**：
+
+* **AC-01**〜**AC-06**（後述）を**すべて満たす**こと
+
+---
+
+## 5) API 仕様（/api/* 契約・エラー規約）
+
+**共通**
+
+* Base：`/api/*`
+* 成功：`{ "ok": true, "data": {...} }`
+* 失敗：`{ "ok": false, "code": "ERROR_CODE", "message": "...", "details": {...} }`
+
+**People**
+
+* `POST /api/person.create` → `{ person:{...}, employment?:{...} }` / `{ person_id }`
+
+  * 失敗: `DUPLICATE_PERSON`, `VALIDATION_FAILED`
+* `POST /api/person.update` → `{ person_id, patch:{...} }` / `{ updated:true, diff:{...} }`
+* `POST /api/person.deleteSoft` → `{ person_id, reason? }` / `{ status:"SOFT_DELETED" }`
+* `POST /api/person.restore` → `{ person_id }` / `{ status:"RESTORED" }`
+
+**Pricing**
+
+* `POST /api/price.upsert` → `{ menu_item_id, price, tax_code, start_on, end_on, store_id?, timeband? }`
+
+  * 失敗: `PRICE_RANGE_OVERLAP`（409相当）
+
+**Navigation（任意拡張）**
+
+* `POST /api/nav.push` → `{ route, params }`（必要なら `TRN_UiNavLog` 記録）
+
+---
+
+## 6) 受け入れ条件（AC）——**満たすまで次に進まない**
+
+* **AC-01 Back 復帰**：一覧→詳細→編集→Backで**検索条件/ページ/ソート/選択/ドロワー**が復元。
+* **AC-02 ソフト削除**：UI削除で `active_flag=false`＋`deleted_*`、**UI非表示/グレー**が選択可能。
+* **AC-03 監査**：create/update/deleteSoft/restore/hardDeleteの**全操作**で `TRN_AuditTrail/Item` に記録。
+* **AC-04 価格重複**：同 `menu_item_id+store_id` の期間が重複すると 409 エラー（`PRICE_RANGE_OVERLAP`）。
+* **AC-05 スキーマ**：**全CRUD**が README の**表名・列名**で動作（ensureSheetで不足列は自動付与）。
+* **AC-06 指定ブック**：`SS_MASTER_ID` が**指定ID**かつ `openById` でアクセス可能。
+
+---
+
+## 7) UI/UXガイド（骨格のみ／HTML内蔵CSSのみ）
+
+* **トーン**：モノトーン＋シアン微発光、角丸2xl、ソフトシャドウ、AAコントラスト、フォーカスリング。
+* **固定ヘッダ**：左上 Back（`Alt+←` 連動）／Breadcrumb／Session Info。
+* **一覧**：左カテゴリ×右テーブル、上部クエリビルダー、ソフト削除行は `line-through + opacity`。
+* **編集**：ドロワー、差分ハイライト、保存時グロー。
+* **未保存ガード**：破棄/保存/キャンセルの3択。
+* **外部CSS禁止**：`styles.html` の `<style>` に**内蔵で完結**。
+
+---
+
+## 8) 自己検証ルーブリック（生成AI向け）
+
+生成AIは各ステージ終了時に次を**自己評価**し、**不足点を自動リトライ**：
+
+1. **契約遵守**：関数名・引数名・返却型・ファイル名が**本台本と一致**しているか。
+2. **Sheet依存**：`Config.tables()` の表名と CRUD が**厳密一致**か。
+3. **監査網羅**：すべての変更パスで `Audit.log` が呼ばれているか。
+4. **削除の一貫性**：UIの削除→softDelete→監査→UI表示（非表示/グレー）の一貫性。
+5. **Back再現**：履歴N=50により3段以上の往復で状態復元できるか（疑似シナリオで想定検証）。
+6. **重複検知**：`DUPLICATE_PERSON`／`PRICE_RANGE_OVERLAP` のエラー返却ができるか。
+7. **エラー規約**：失敗時 `{ ok:false, code, message }` 形式になっているか。
+
+---
+
+## 9) リトライ戦略（詰まった時の指示）
+
+* **禁止**：次のステージに進むこと、.gs/.html以外のファイルを出すこと。
+* **許可**：同ステージ内での**再生成**、補助コメントの追加、未実装関数の埋め戻し。
+* **終了条件**：当該ステージの**ACすべてを満たした**とき。
+
+---
+
+## 10) Codex への投入テンプレ（このまま投げるだけ）
+
+### PROMPT-GLOBAL（前置き）
+
+```
+あなたは上級エンジニアです。コードは Apps Script（.gs）と HTMLService（.html）だけで生成してください。
+次を唯一の仕様とみなし、命名・I/O・スキーマに一切の逸脱を許しません：
+- README.md（KUROZUMI v1.1 全文）
+- CODEGEN.md（v1.2／このファイル）
+
+絶対制約：
+- 生成物は .gs と .html のみ（.ts/.css/.json/.yml など禁止）
+- 指定ブックIDを Config にハードコード
+- ソフト削除既定、監査ログ必須、Back常設・状態復元
+- スキーマ名・列名は README の定義に厳密一致
+
+出力はステージ順（Stage1→Stage6）。各ステージで AC を自己検証し、満たさない場合は当該ステージを再生成してから次へ進んでください。
+```
+
+### PROMPT-STAGE1
+
+```
+Stage1 を生成してください：
+- apps_script/appsscript.json（スコープ：spreadsheets 書読, drive.readonly）
+- apps_script/Config.gs（SS_MASTER_ID, tables(), commonColumns(), schemaVersion(), ui()）
+
+AC：
+- スコープが正しい
+- 指定ブックIDが定数で埋め込まれている
+- tables() に READMEの全テーブル名が含まれる
+```
+
+### PROMPT-STAGE2
+
+```
+Stage2 を生成してください：
+- Uuid.gs / Time.gs / Lock.gs / Sheets.gs
+- JSDoc で全関数の I/O/例外を明記
+- Lock.withLock は指数リトライ（3回/500ms指数）
+- Sheets.ensureSheet はヘッダを自動セット
+
+AC：
+- ensureSheet の仕様どおりにヘッダを作れる
+- getAll(activeOnly:true) でソフト削除行を除外取得できる
+```
+
+### PROMPT-STAGE3
+
+```
+Stage3 を生成してください：
+- Repo.gs / Validate.gs / Audit.gs
+
+要件：
+- upsert が created_*/updated_* を自動付与
+- softDelete が active_flag=false & deleted_* を設定し、監査 DELETE_SOFT を残す
+- noOverlap が同一キー集合の期間重複を検知
+
+AC：
+- CREATE/UPDATE/DELETE_SOFT/RESTORE/DELETE_HARD がすべて AuditTrail/Item に記録される
+```
+
+### PROMPT-STAGE4
+
+```
+Stage4 を生成してください：
+- NavService.gs / UiRouteService.gs / UiController.gs
+- index.html / styles.html / scripts.html（外部CSS禁止、<style>内蔵）
+要件：
+- 固定ヘッダー Back、履歴N=50、状態復元、未保存ガード
+- RBAC簡易（拡張で MST_Ui* に対応可能な設計）
+AC：
+- 一覧→詳細→編集→Back で検索条件/ページ/ソート/選択/ドロワーを復元
+```
+
+### PROMPT-STAGE5
+
+```
+Stage5 を生成してください：
+- PersonService.gs / PersonEndpoints.gs / StoreService.gs / PricingService.gs
+- /api/person.* および /api/price.upsert
+
+AC：
+- person.create が氏名カナ＋生年月日＋電話の厳密一致で重複検知し DUPLICATE_PERSON を返す
+- price.upsert が期間重複を検知し PRICE_RANGE_OVERLAP を返す
+```
+
+### PROMPT-STAGE6
+
+```
+Stage6（最小E2E整合）：
+- 生成物は .gs/.html のみかを確認
+- AC-01〜AC-06 を満たすまで不足箇所を当該ステージで再生成して補完
+- 満たしたら完了
+```
+
+---
+
+## 11) セキュリティ/運用の最低ライン（コメントで明記すべき事項）
+
+* `Config.gs` に **PIIは別ブックで運用**の方針コメントを記載。
+* `Repo.hardDelete` は**管理ユーティリティからのみ**呼び出す旨のコメント。
+* `Lock.withLock` を**書込前**に必ず使う設計方針のコメント。
+* `UiController.doPost` は**全て `{ ok: true|false, ... }` 規約**を強制する旨のコメント。
+
+---
+
+## 12) 監査・可観測性（最小骨格）
+
+* すべての変更系APIで `Audit.log` を呼び出し、`TRN_AuditTrail` と `TRN_AuditItem` を更新。
+* UIでの削除操作は**必ず**ソフト削除→UI反映（非表示/グレー）→監査記録の順序を保証。
+* 任意で `TRN_UiNavLog` を拡張時に記録（最小構成ではスキップ可）。
+
+---
+
+## 13) 仕上げチェックリスト（開発者が見るべき観点）
+
+* [ ] すべて .gs/.html のみになっている
+* [ ] `SS_MASTER_ID` が指定ブックのID
+* [ ] `tables()` が READMEの表を網羅
+* [ ] Back 三段復帰が可能
+* [ ] ソフト削除→監査→UI 表示（非表示/グレー）の一貫性
+* [ ] `PRICE_RANGE_OVERLAP`／`DUPLICATE_PERSON` が期待通り返る
+* [ ] 監査ログが全パスに残る
+
+---
+
+### 付記：README（KUROZUMI v1.1）との整合ポイント（再掲）
+
+* **指定スプレッドシートは Master DB**（機能紐づけ済み）。
+* **戻るボタン常設の MPA**、**ソフト削除標準**、**ER/フロー/機能関連図**は README をそのまま採用。
+* **追加シートは最小構成では不要**。ナビ可観測性を高めたい場合のみ `MST_Ui*` 4表を追加。
+
+---
+
+これで、**コーディング一切なし**で、Codexに**.gs/.htmlのみ**の完全骨格を段階生成させるための**最上位台本**が完成です。
+この `CODEGEN.md v1.2` を README と一緒にリポジトリへ置き、上記 **PROMPT-GLOBAL → STAGE1…6** を**順番通り**投げれば、あなたのMPA×GAS×Sheets（Master DB）を**総刷新・フルスクラッチ**で出力させる精度と再現性が最大化されます。
