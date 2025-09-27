@@ -1,0 +1,440 @@
+了解。原因は「指示が“足りていない/曖昧なまま”の領域」がまだ残っているからです。
+**シート数は据え置き**のまま、**MPA × GAS × HTML**だけで **Ironman×モノトーン・サイバーパンク**のHUDを“中央レイアウト”で実装させ、**ERの中身は列レベルで深堀**し、**Back常設＋状態復元＋監査＋期間重複**まで漏れなく反映させるための**追加指令テンプレ**を用意しました。
+このまま `CODEGEN-ADDENDUM-v1.4.md` としてリポジトリに追加し、**README / CODEGEN.md / v1.3 加筆分**と**セットでCodexに読み込ませて**ください。
+
+---
+
+# CODEGEN-ADDENDUM-v1.4 — KUROZUMI（UI/UX特化・中央レイアウト・ER密度・AC強化）
+
+> 目的：**UIを“アイアンマンHUD×モノトーン・サイバーパンク”で中央レイアウト化**し、**ERは列追加で密度を上げる（シート数は増やさない）**。
+> 出力は **.gs / .html のみ**（Apps Script HTMLService）。外部ビルド・外部CDN・外部CSS/JS使用**禁止**。
+
+---
+
+## 1) クリティカル修正（今回必須の“上書き”指令）
+
+1. **中央レイアウト固定**（左寄り禁止）
+
+   * ルートコンテナを `max-width:1280px`（XL）、`margin-inline:auto` で**常時中央**。
+   * 12カラムグリッド（列幅 `minmax(0,1fr)`）＋ガター 16px。
+   * ブレークポイント：`≥1440px:1280px固定` / `≥1024px:<1280pxの90%` / `<1024px: 100%（内側に16pxパディング）`。
+   * **AC**：Start/一覧/詳細/編集の**メインカードが常に中央**に表示され、両サイドに**均等の余白**が出ること。
+
+2. **HUDヘッダー（固定）＋Back常設**
+
+   * `position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(6px)`
+   * 左：Back（アイコン＋Alt+←）／中央：パンくず自動生成／右：Session情報（User/Role/Store）。
+   * **AC**：Back押下/Alt+← で **前状態を完全復元**（検索条件・ページ・ソート・選択・ドロワー）。
+
+3. **ドロワー編集の右スライド**
+
+   * `transform: translateX(100%) → 0`（260ms、cubic-bezier(0.19,1,0.22,1)）。
+   * **未保存ガード**（破棄/保存/キャンセル）必須。
+   * **AC**：編集→保存でシアングロー、キャンセル時は状態ロールバック。
+
+4. **テーブル（固定ヘッダ／非アクティブの視覚）**
+
+   * 固定ヘッダ：shadow + subtle glow。
+   * `tr[data-active="false"]` は `opacity: .45; text-decoration: line-through; pointer-events: none;`。
+   * **AC**：ソフト削除済みは**自動でグレーアウト**し操作不可。
+
+5. **ERの“列”だけ増やす（**タブの数は増やさない**）**
+
+   * 例：`MST_Store.business_hours_json / facility_tags / health_permit_expiry`、`MST_Person.tags_json / photo_drive_id / consent_signed_on`、`TRN_AuditTrail.ip/ua/route/session_id`、`MST_Price.timeband` など。
+   * **AC**：`Sheets.ensureSheet` は**不足“列”のみ自動追加**。**新しいシート（タブ）は増設しない**。
+
+---
+
+## 2) デザイントークン（styles.htmlに**必須**で入れる）
+
+```css
+:root{
+  --bg:#0A0A0A; --panel:#121218; --line:#262A32;
+  --text:#E6E6E6; --muted:#A0A3A6; --disabled:#6B6E73;
+  --glow:#00F6FF; --glow-weak:rgba(0,246,255,.12);
+  --accent:#FF2E6D; --ok:#39D98A; --warn:#FFD166; --err:#FF5A5F;
+  --radius-xl:16px; --radius-2xl:20px;
+  --shadow:0 8px 24px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.02);
+  --neon:0 0 16px var(--glow-weak), 0 0 2px var(--glow);
+}
+html,body{background:var(--bg); color:var(--text);}
+.container{
+  width:100%; max-width:1280px; margin-inline:auto;
+  padding-inline:16px; display:grid; grid-template-columns: repeat(12, minmax(0,1fr));
+  gap:16px;
+}
+.card{background:var(--panel); border:1px solid rgba(255,255,255,.06); border-radius:var(--radius-2xl); box-shadow:var(--shadow);}
+.card:hover{box-shadow:var(--neon);}
+.hud{position:sticky; top:0; z-index:1000; background:rgba(10,10,10,.75); backdrop-filter:blur(6px); border-bottom:1px solid rgba(255,255,255,.06);}
+.btn{border:1px solid rgba(255,255,255,.12); border-radius:12px; padding:.625rem .9rem; background:transparent;}
+.btn-primary{border-color:var(--glow); box-shadow:0 0 0 1px rgba(0,246,255,.28) inset;}
+.toast{position:fixed; right:24px; top:24px; padding:12px 16px; border-radius:12px; background:#0F1318; border:1px solid rgba(255,255,255,.08); box-shadow:var(--neon);}
+.table thead{position:sticky; top:56px; background:linear-gradient(180deg, rgba(18,18,24,.95), rgba(18,18,24,.88));}
+tr[data-active="false"]{opacity:.45; text-decoration:line-through; pointer-events:none;}
+.focus-ring:focus{outline:2px solid var(--glow); outline-offset:2px;}
+```
+
+> **禁止**：外部フォント/CDN/JS/CSS。**すべて styles.html 内完結**。
+
+---
+
+## 3) モーション（scripts.htmlに**必須**で入れる）
+
+* 遷移：Mainコンテナを **フェード(120ms)**＋**3px浮き**。
+* 戻る：逆方向フェード(90ms)。
+* 保存成功：編集カードの外周に **1.8秒の薄いシアングロー**。
+* エラー：対象フォームを **軽くシェイク（-2px/+2px×3回/120ms）**。
+* **AC**：トーストは `aria-live="polite"`、Alt+← / Esc / Tab が効く。
+
+---
+
+## 4) ルーティング／状態復元仕様（MPA・Back）
+
+* ルート名固定：`Start`, `People.List`, `People.Detail`, `People.Edit`, `Store.List`, `Store.Detail`, `Pricing.List`, `Pricing.Edit`。
+* `route_key = route + '?' + canonical(params)`。状態保存対象：**検索条件、ページ、ソート、選択ID、ドロワー開閉**。
+* **AC**：一覧→詳細→編集→**Back**で**直前の状態**に完全復帰。未保存ガードは必須。
+
+---
+
+## 5) ER深堀（**列だけ**増やす・表数は固定）
+
+> **テーブルは増やさない**。必要な密度は**列追加**で担保。以下を最低限追加（命名は厳守）。
+
+* `MST_Store`：`business_hours_json`, `facility_tags`, `health_permit_expiry`
+* `MST_FranchiseContract`：`royalty_scheme_json`, `breach_count`
+* `MST_Person`：`tags_json`, `photo_drive_id`, `consent_signed_on`
+* `MST_Employment`：`is_primary`, `org_unit_path`, `policy_ack_on`
+* `MST_Product`：`allergen_codes`, `shelf_life_days`, `recalc_cost_on`
+* `BOM_Component`：`yield_rate`, `loss_allowance`
+* `MST_Price`：`timeband`, `start_on`, `end_on`, `store_id?`（任意）
+* `TRN_AuditTrail`：`ip`, `ua`, `route`, `session_id`
+
+**AC**：`Sheets.ensureSheet(name, headers)` は**不足列を自動追加**し、**タブ（シート）を増やさない**こと。
+
+---
+
+## 6) API契約（再掲＋厳密化）
+
+* **共通**：`{ ok:true, data:{...} }` / `{ ok:false, code, message, details? }`
+* **エラーコード**：
+
+  * `PRICE_RANGE_OVERLAP`（同 `menu_item_id + store_id + timeband` で期間交差）
+  * `DUPLICATE_PERSON`（`name_kana + birthdate + phone` 厳密一致）
+  * `FORBIDDEN`（RBAC）
+* **監査**：`Audit.log` は **ip/ua/route/session_id** 付与必須。
+
+**AC**：UI トースト文言は以下の固定コピーを使う：
+
+* 成功：「✅ 保存しました」/「✅ 復元しました」
+* 409 重複：「⚠ 期間が重複しています。既存: {start}–{end}」
+* 人物重複：「⚠ 同一候補が見つかりました（氏名カナ/生年月日/電話）」
+* 権限なし：「🚫 権限がありません」
+
+---
+
+## 7) デモ品質の強制（生成時の“実デモ体験”を担保）
+
+1. **Seedデータ（HTMLだけで）**
+
+   * Startカード：People/Store/Pricing… 各カードに **サンプル件数バッジ**（例：People 126 名）。
+   * People.List：ダミー3行（うち1行は `data-active="false"`）。
+   * Pricing.List：同 `menu_item_id+store_id+timeband` の**重複デモ**用2行。
+   * **AC**：初回起動だけで「中央配置」「Back」「Drawer」「重複409」「ソフト削除グレーアウト」「トースト」が**目視確認**できる。
+
+2. **センタリング確認**
+
+   * 1440/1280/1024/768 の4幅でコンテンツの中央保持。
+   * **AC**：どの幅でも左寄りしない。
+
+---
+
+## 8) 追い指示テンプレ（**このままCodexに貼る**）
+
+### PROMPT-FIX-LAYOUT
+
+```
+中央レイアウトを強制します。containerは max-width:1280px, margin-inline:auto, grid(12cols, gap16)。HUDヘッダーはsticky+blur。メインカードは常に中央配置。ブレークポイントは 1440/1280/1024/768 を想定し、常に中央を維持。左寄り表示は禁止。
+```
+
+### PROMPT-HUD-STYLE
+
+```
+styles.html 内にデザイントークンを定義し、外部CSS/JS禁止。カードは角丸20px+ソフトシャドウ+淡いグロー。テーブルは固定ヘッダ、inactive行はopacity.45+line-through。トーストは右上、aria-live=polite。
+```
+
+### PROMPT-MOTION
+
+```
+scripts.html で遷移フェード(120ms)+浮き、Back逆フェード(90ms)、保存時ネオングロー(1.8s)、エラー時シェイク(120ms×3)。Alt+←/Esc/Tabのアクセシビリティ対応。
+```
+
+### PROMPT-MPA-STATE
+
+```
+NAV履歴(N=50)と route_key=route+'?'+canonical(params) で状態保存/復元。保存対象は検索条件/ページ/ソート/選択ID/ドロワー開閉。未保存ガード(破棄/保存/キャンセル)を必ず実装。
+```
+
+### PROMPT-ER-COLUMNS
+
+```
+テーブル数は増やさず、E節の列を既存シートに追加。Sheets.ensureSheet は不足列の自動追加のみ行い、タブ増設は禁止。TRN_AuditTrail には ip/ua/route/session_id を必ず書き込む。
+```
+
+### PROMPT-API-STRICT
+
+```
+全APIは {ok:true|false, ...} で返す。409は PRICE_RANGE_OVERLAP、人重複は DUPLICATE_PERSON、権限は FORBIDDEN。固定トースト文言を使用。/api/person.*, /api/price.upsert を優先実装。
+```
+
+### PROMPT-DEMO-SEED
+
+```
+初回デモ体験のため、Start/People.List/Pricing.List にダミー行を埋め込んでUIの中央配置/Back/Drawer/409/ソフト削除/トーストを目視確認できるようにする。ダミーはHTML上のテンプレで良い。
+```
+
+### PROMPT-AC-GATE
+
+```
+次に進む前に下記ACを満たすこと：
+- どの画面も中央レイアウトで左右対称の余白
+- Backで状態完全復元（検索/ページ/ソート/選択/ドロワー）
+- inactive行の視覚（灰+取り消し線）と操作不可
+- 価格の期間重複で409と指定メッセージ
+- 監査に ip/ua/route/session_id を格納
+- シート（タブ）数は不変、列だけが増える
+満たさない場合は同ステージで再生成すること。
+```
+
+---
+
+## 9) ビジュアルQAチェックリスト
+
+* [ ] 1440/1280/1024/768 で**常に中央**（左寄りゼロ）
+* [ ] HUDヘッダーが薄いグロー＋sticky
+* [ ] Back（ボタン/Alt+←）で**直前状態**に復帰
+* [ ] Drawerのスライド/未保存ガード
+* [ ] 保存成功時の**シアングロー**、エラー時の**シェイク**
+* [ ] テーブル固定ヘッダ＋inactiveの**グレーアウト**
+* [ ] 409/DUPLICATE/403 の**統一メッセージ**
+* [ ] 監査の `ip/ua/route/session_id` が **TRN_AuditTrail** に残る
+* [ ] **シート数は不変**、不足**列のみ**が追加されている
+
+---
+
+## 10) 実装メモ（.gs/.htmlだけで仕上げるための注意）
+
+* HTMLService（`createTemplateFromFile`）＋ `<?!= include('styles'); ?> / <?!= include('scripts'); ?>` 構成。
+* `google.script.run.withSuccessHandler/withFailureHandler` と JSON API `/api/*` で通信。
+* `UiRouteService` がルート名とパンくずを返す。パンくずは**自動生成**。
+* Repo/Validate/Audit の I/O は CODEGEN.md の契約のまま。
+* **LockService** で書込排他、`CacheService` はLKPなど参照に限定。
+* **外部ライブラリ禁止**（地図やアイコンもSVG inlineで最小限）。
+
+わかった。いま必要なのは「**要件定義→生成→検収**」の**拘束力**を最大化する“追加ディレクティブ”＝**抜け漏れを起こさない命令パック**だよね。
+**シート数は一切増やさず**、UIは**中央レイアウトのアイアンマン系HUD**、そして**ERは列の密度だけを上げる**——この3本柱で**Codexを厳密に縛る**ための最終版を用意した。これを**CODEGEN-ADDENDUM（最終）**としてREADME/CODEGENと一緒に読み込ませ、下の**PROMPT順**で投げれば、今ある構成のまま“満額着地”させられる。
+
+---
+
+# CODEGEN-ADDENDUM（最終）—「シート数固定」×「中央HUD」×「ER密度アップ」
+
+> 目的：既存シート**一切増やさず**、GAS(.gs)＋HTML(.html)のみで、**MPA/Back/監査/期間重複/ソフト削除**と**未来的HUD UI**を**実演できるレベル**まで作り込ませる。
+> ここに書かれた**禁止事項／合格基準**に**Codexは必ず従う**こと。
+
+---
+
+## A. スキーマ・ロック（**タブは増やさない**）
+
+1. **許可する操作**
+
+* 既存の**同名タブ**に対して「**列の追加**／列の並び替え**は不可**（末尾追加のみ）」
+* 条件付き書式・検証の追加
+* データの投入（Seed）
+
+2. **禁止**
+
+* **新規タブ追加**・既存タブの削除/改名
+* 列名の変更・共通列の削除
+
+3. **Schema Lock Manifest（Codexが参照する固定一覧）**
+   以下タブ**のみ**を対象とする（既に存在する前提）。この**リスト外へアクセス禁止**。
+
+* **MST_Company / MST_Division / MST_Store / MST_Franchisee / MST_FranchiseContract**
+* **MST_Person / MST_Employment / MST_UserAccount / MST_Role / TRN_UserRole**
+* **MST_Group / TRN_GroupMember / MST_Address / LNK_Address**
+* **MST_Vendor / MST_Product / BOM_Component / MST_MenuItem / MST_Price / MST_Promotion / LNK_PromoApplicability**
+* **TRN_PurchaseOrder / TRN_PO_Line / TRN_StockLot / TRN_StockMove**
+* **TRN_SalesReceipt / TRN_SalesLine / TRN_Tender**
+* **TRN_Shift / TRN_TimeClock / TRN_Leave**
+* **TRN_Incident / TRN_IncidentParticipant / TRN_MaintTicket**
+* **TRN_Document / LNK_Document**
+* **TRN_AuditTrail / TRN_AuditItem**
+* **LKP_***（Prefecture/StoreKind/EmploymentType/Role/Tax…）
+
+> 既存ADDENDUM同様、UIナビ用の追加タブは**使わず**、ナビ観測は**アプリ内メモリ＋AuditTrail拡張列**で代替。
+
+---
+
+## B. ER「列」だけ増やす（**最小必須**／末尾追加）
+
+> 下記は**最低限**の増列。**足すなら末尾のみ**、命名は厳守。
+
+* **MST_Store**：`business_hours_json`, `facility_tags`, `health_permit_expiry`
+* **MST_FranchiseContract**：`royalty_scheme_json`, `breach_count`
+* **MST_Person**：`tags_json`, `photo_drive_id`, `consent_signed_on`
+* **MST_Employment**：`is_primary`, `org_unit_path`, `policy_ack_on`
+* **MST_Product**：`allergen_codes`, `shelf_life_days`, `recalc_cost_on`
+* **BOM_Component**：`yield_rate`, `loss_allowance`
+* **MST_Price**：`timeband`, `start_on`, `end_on`, `store_id`(任意)
+* **TRN_AuditTrail**：`ip`, `ua`, `route`, `session_id`
+
+**検収AC**
+
+* `ensureSheet()`は**不足列がある場合のみ**末尾追記。
+* **タブ数は増えていない**こと（手動でも自動でも）。
+
+---
+
+## C. UI/UX（中央レイアウトのHUD）— **必須仕様**
+
+1. **中央固定**
+
+* `.container{max-width:1280px;margin-inline:auto;display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px;padding-inline:16px}`
+* 1440/1280/1024/768の各幅で**常に中央**（左右余白が均等）
+
+2. **HUDヘッダー（戻る常設）**
+
+* sticky + blur、左：Back（Alt+←対応）、中央：パンくず、右：Session
+* Backで**検索条件/ページ/ソート/選択/ドロワー**を完全復元
+
+3. **編集ドロワー**
+
+* 右からスライド、未保存ガード（破棄/保存/キャンセル）、保存成功で**薄いシアングロー1.8秒**
+
+4. **テーブル**
+
+* 固定ヘッダー、`tr[data-active="false"]` は灰+取り消し線+操作不可
+
+5. **動き（最小アニメ）**
+
+* ページ遷移フェード（120ms）/Back逆フェード（90ms）/エラー軽シェイク/トースト`aria-live=polite`
+
+**検収AC**
+
+* **左寄りが一切無いこと**
+* キーボード**Alt+←**でBack復帰、**Esc**でドロワークローズ
+
+---
+
+## D. 検証ルール（要件定義に沿った**最低限**）
+
+* **Pricing**：`menu_item_id + store_id + timeband` の期間重複を**409**で拒否（`PRICE_RANGE_OVERLAP`）
+* **Person重複**：`name_kana + birthdate + phone` 厳密一致で**409**（`DUPLICATE_PERSON`）
+* **LKP整合**：都道府県などは `LKP_*` 参照
+* **ソフト削除**：UI削除＝`active_flag=false`＋`deleted_*`、UIは灰＆非操作
+* **監査**：`CREATE/UPDATE/DELETE_SOFT/RESTORE`＋`ip/ua/route/session_id` を `TRN_AuditTrail` へ
+
+---
+
+## E. API契約（GAS doPost ルーティング）
+
+* **成功**：`{ ok:true, data:{...} }`
+* **失敗**：`{ ok:false, code:"...", message:"...", details? }`
+* 主要：
+
+  * `POST /api/person.create|update|deleteSoft|restore`
+  * `POST /api/price.upsert`
+  * `POST /api/nav.push`（任意・ナビ監査はAuditTrailで代替可）
+
+**固定メッセージ**
+
+* 成功：「✅ 保存しました」/「✅ 復元しました」
+* 409 価格：「⚠ 期間が重複しています。既存: {start}–{end}」
+* 409 人物：「⚠ 同一候補が見つかりました（氏名カナ/生年月日/電話）」
+* 403：「🚫 権限がありません」
+
+---
+
+## F. デモ品質（初回で“見える化”）
+
+* Start：People/Store/Pricingの**ダミーカード**（件数バッジ）
+* People.List：ダミー3行（1行は `data-active="false"`）
+* Pricing.List：重複を起こすダミー2行（保存時に409を再現）
+* **目的**：**コーディングなしでもUIの中央・Back・Drawer・グレーアウト・409トーストが体験できる**
+
+---
+
+## G. 受け入れ基準（**満たすまで次に進まない**）
+
+1. **タブ数不変**（列追加のみ）
+2. **中央レイアウト**（全画面で左右対称の余白）
+3. **Backで完全復元**（検索/ページ/ソート/選択/ドロワー）
+4. **ソフト削除の可視＆非操作**
+5. **価格期間重複は409**／**人物重複も409**
+6. **AuditTrail** に `ip/ua/route/session_id` 記録
+7. **固定トースト文言**が使用されている
+
+---
+
+# Codex への最終指令（そのまま投げるやつ）
+
+> これを**順番に**投げる。各プロンプトの最後に「**上のACを満たすまで次へ進まない**」を必ず付ける。
+
+### 1) PROMPT: スキーマ・ロック適用
+
+```
+スキーマ・ロックを適用する。新規タブ作成・既存タブ改名は禁止。既存タブに不足「列」を末尾に追加することのみ許可。Schema Lock Manifestにあるタブ以外はアクセス禁止。ensureSheetは不足列のみ追記し、並び替えや中間挿入は禁止。上のACを満たすまで次へ進まない。
+```
+
+### 2) PROMPT: 中央HUD UI（styles.html / index.html / scripts.html）
+
+```
+中央レイアウトのHUDを実装。containerはmax-width:1280pxの12グリッド、常に中央。HUDヘッダーはsticky+blur+Back常設、Alt+←対応、パンくず自動生成。ドロワー編集は右スライドと未保存ガード、保存成功時はネオングロー。テーブルは固定ヘッダ、inactive行は灰+取り消し線+非操作。外部CSS/JS禁止・.html内完結。上のACを満たすまで次へ進まない。
+```
+
+### 3) PROMPT: MPA状態復元＆Back（NavService / UiController）
+
+```
+NAV履歴(N=50)とroute_keyで状態保存/復元を実装。復元対象は検索条件/ページ/ソート/選択ID/ドロワー。BackやAlt+←で直前状態に完全復帰。未保存ガード(破棄/保存/キャンセル)必須。上のACを満たすまで次へ進まない。
+```
+
+### 4) PROMPT: Repo/Validate/Audit（列追加のみ対応）
+
+```
+Repo/Validate/Auditを実装。upsertはcreated_*/updated_*自動設定、softDeleteはactive_flag=falseとdeleted_*付与、Audit.logはCREATE/UPDATE/DELETE_SOFT/RESTOREに加えip/ua/route/session_idをTRN_AuditTrailへ記録。ensureSheetは不足列のみ追記、タブは増やさない。上のACを満たすまで次へ進まない。
+```
+
+### 5) PROMPT: People/Store/Pricing API（409/403/監査）
+
+```
+/api/person.create|update|deleteSoft|restore, /api/price.upsert を実装。人物重複（name_kana+birthdate+phone）は409=DUPLICATE_PERSON。価格はmenu_item_id+store_id+timebandの期間重複で409=PRICE_RANGE_OVERLAP。RBACは簡易で403。固定トースト文言を返す。上のACを満たすまで次へ進まない。
+```
+
+### 6) PROMPT: デモSeed＆ビジュアルQA
+
+```
+Start/People.List/Pricing.Listにダミーデータをセットし、中央配置/Back/Drawer/ソフト削除グレー/409メッセージ/トーストが初回で目視できるようにする。1440/1280/1024/768で左寄りがないことを確認。上のACを満たすまで次へ進まない。
+```
+
+---
+
+## 追加の“詰め”ポイント（落ちやすい穴を先回り）
+
+* **「列だけ増やす」実装**：`ensureSheet(name, headers)` に「既存ヘッダとの差分だけ末尾追記」ロジックを**明文化**。
+* **中央ズレ対策**：`body{display:flex;}`系は**禁止**（ブラウザ差で左寄り化するため）。`.container`の**auto margin**に統一。
+* **Back復元の網羅**：検索条件・ページ・ソート・選択ID・ドロワー開閉の**5点セット**を**一括スナップショット**化（個別保存だと漏れる）。
+* **監査の拡張列**：`ip, ua, route, session_id` は**必ず**AuditTrailへ。UIの「今どこ」を証跡化。
+* **エラーメッセ一貫性**：409/403は**固定コピー**で返す。UXの質感を揃える。
+
+---
+
+## 最終チェックリスト（あなたの検収用）
+
+* [ ] タブ数**不変**（増えていない）
+* [ ] 追加は**列だけ**（末尾）
+* [ ] 全画面が**完全中央**（4幅検証）
+* [ ] Backで**状態完全復元**（5点セット）
+* [ ] `active_flag=false` 行が**灰＋取り消し＋非操作**
+* [ ] `price.upsert` 409／`person.create` 409 が**指定メッセ**で出る
+* [ ] `TRN_AuditTrail` に `ip/ua/route/session_id` が入っている
+* [ ] 外部CSS/JS**不使用**（.gs/.htmlのみ）
+* [ ] トーストは右上・`aria-live="polite"`・ショートコピー固定
