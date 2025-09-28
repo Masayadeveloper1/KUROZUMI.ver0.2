@@ -1966,3 +1966,19 @@ Stage6（最小E2E整合）：
 
 これで、**コーディング一切なし**で、Codexに**.gs/.htmlのみ**の完全骨格を段階生成させるための**最上位台本**が完成です。
 この `CODEGEN.md v1.2` を README と一緒にリポジトリへ置き、上記 **PROMPT-GLOBAL → STAGE1…6** を**順番通り**投げれば、あなたのMPA×GAS×Sheets（Master DB）を**総刷新・フルスクラッチ**で出力させる精度と再現性が最大化されます。
+
+## Diagrams
+- [ER Core](docs/er/core.md)
+- [Functional Map](docs/er/functional.md)
+- [Key Sequences](docs/er/sequence.md)
+- [DFD Level 1](docs/er/dfd.md)
+
+### Child Table Creation Origins
+- `MST_Employment` rows originate on **People Detail** via `btnPersonUpdate` (配属追加)。
+- `TRN_UserRole` rows originate on **People Detail** via `btnPersonUpdate`（ユーザー権限付与）。
+- `MST_Asset` rows originate on **Stores Detail** via `btnStoreUpdate`（設備登録）。
+- `TRN_StockMove` rows originate on **Inventory HUD** via `btnMoveStock`（在庫移動）。
+- `MST_Price` rows originate on **Pricing Lab** via `btnPriceUpsert`（価格改定）。
+- `TRN_Tender` rows originate on **Sales Pulse** via `btnSalesCreate`（POS 決済）。
+- `TRN_Incident` rows originate on **Quality Desk** via `btnIncidentReport`（事故報告）。
+- `TRN_Document` rows originate on **Docs Library** via `btnDocUpload`（文書共有）。
